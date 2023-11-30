@@ -1,0 +1,16 @@
+Package: empaticaR
+Title: Read and organize data from Empatica EmbracePlus watch
+Version: 0.0.0.9000
+Authors@R: 
+    person("Brian", "Lau", , "brian.lau@upmc.fr", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0001-8615-8244"))
+Description: Read and organize data from Empatica EmbracePlus watch.
+Imports:
+    tidyverse,
+    magrittr,
+    sparklyr,
+    s3fs
+License: use_mit_license()
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
