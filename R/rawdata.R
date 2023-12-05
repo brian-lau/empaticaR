@@ -17,12 +17,12 @@ read_empatica_avro_dir <- function(path,
   # [study_id]-[site_id]-[participant_id]_[timestamp].avro
   # The Avro filename contains the start timestamp,
   # in Unix timestamp (s), of the file content.
-  filenames <- dir(path)
-  # Sort filenames just in case
-  # TODO
+  path <- normalizePath(path)
+  filenames <- list.files(path = path, pattern = "\\.avro$", full.names = F)
+
   DF = list()
   for (f in filenames) {
-    DF[[f]] <- read_empatica_avro_file(sc = sc, path = paste0(basepath, f))
+    DF[[f]] <- read_empatica_avro_file(sc = sc, path = file.path(path, f))
   }
 
   df <- dplyr::bind_rows(DF, .id = "filename")
@@ -88,28 +88,28 @@ read_empatica_avro_file <- function(path,
   }
 
   df <- sparklyr::spark_read_avro(sc, path = path) %>%
-    collect()
+    sparklyr::collect()
 
   if (spark_disconnect_on_exit) {
-    df %<>% collect()
+    df %<>% sparklyr::collect()
     message("Closing Spark connection.\n")
     sparklyr::spark_disconnect(sc)
     collect_on_exit <- TRUE
   }
 
   if (collect_on_exit & !spark_disconnect_on_exit)
-    df %<>% collect()
+    df %<>% sparklyr::collect()
 
   if (parse_rawdata & collect_on_exit) {
-    df_raw <- parse_empatica_rawdata(df %>% pull(rawData), ...)
-    df %<>% select(-rawData) %>% bind_cols(df_raw)
+    df_raw <- parse_empatica_rawdata(df %>% dplyr::pull(rawData), ...)
+    df %<>% dplyr::select(-rawData) %>% dplyr::bind_cols(df_raw)
   }
 
   # Flatten versioning information & enrollment
   df %<>% mutate(across(c(schemaVersion, fwVersion, hwVersion, algoVersion),
                         ~ unlist(.x) %>% paste0(collapse = ".")))
   df_enroll <- df$enrollment %>% unlist() %>% rev() %>% tibble::as_tibble_row()
-  df <- bind_cols(df_enroll, df %>% select(-enrollment))
+  df <- dplyr::bind_cols(df_enroll, df %>% dplyr::select(-enrollment))
 
   return(df)
 }
@@ -161,23 +161,29 @@ parse_empatica_rawdata <- function(rawdata,
   VARS = list()
   for (var in varnames) {
     if (var == "tags") {
-      t_utc <- anytime::utctime(rawdata[[var]]$peaksTimeMicros / 1e6)
-      VARS[[var]] <- tibble(t = t_utc)
+      t_utc <- rawdata[[var]]$tagsTimeMicros
+      if (is.numeric(t_utc)) {
+        t_utc <- anytime::utctime(rawdata[[var]]$tagsTimeMicros / 1e6)
+      } else {
+        t_utc <- anytime::utctime(c() / 1e6)
+      }
+      VARS[[var]] <- tibble::tibble(t = t_utc)
     } else if (var == "systolicPeaks") {
       t_utc <- anytime::utctime(rawdata[[var]]$peaksTimeNanos / 1e9)
-      VARS[[var]] <- tibble(t = t_utc)
+      VARS[[var]] <- tibble::tibble(t = t_utc)
     } else {
       n <- ifelse(!is.null(rawdata[[var]]$values),
                   length(rawdata[[var]]$values),
                   length(rawdata[[var]]$x))
-      t_start <- rawdata[[var]]$timestampStart / 1e6
-      t_utc <- (1:n) - 1
-      Fs <- rawdata[[var]]$samplingFrequency
-      t_utc = anytime::utctime(t_utc/Fs + t_start)
 
       if (n > 0) {
+        t_start <- rawdata[[var]]$timestampStart / 1e6
+        t_utc <- (1:n) - 1
+        Fs <- rawdata[[var]]$samplingFrequency
+        t_utc = anytime::utctime(t_utc/Fs + t_start)
+
         if (var %in% c("accelerometer", "gyroscope")) {
-          VARS[[var]] <- tibble(
+          VARS[[var]] <- tibble::tibble(
             t = t_utc,
             x = rawdata[[var]]$x,
             y = rawdata[[var]]$y,
@@ -192,7 +198,7 @@ parse_empatica_rawdata <- function(rawdata,
             rawdata[[var]]$imuParams$digitalMin
           VARS[[var]] %<>% mutate(across(c(x,y,z), ~.x*delta_physical/delta_digital))
         } else {
-          VARS[[var]] <- tibble(
+          VARS[[var]] <- tibble::tibble(
             t = t_utc,
             values = rawdata[[var]]$values
           )
@@ -203,5 +209,5 @@ parse_empatica_rawdata <- function(rawdata,
     }
   }
 
-  df <- tibble::enframe(VARS) %>% tidyr::pivot_wider()
+  return(tibble::enframe(VARS) %>% tidyr::pivot_wider())
 }
